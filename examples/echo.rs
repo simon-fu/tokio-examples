@@ -21,7 +21,7 @@
 
 #![warn(rust_2018_idioms)]
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{io::{self, AsyncWriteExt, Interest}};
 use tokio::net::TcpListener;
 
 use std::env;
@@ -55,23 +55,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // which will allow all of our clients to be processed concurrently.
 
         tokio::spawn(async move {
-            let mut buf = vec![0; 1024];
+            
 
             // In a loop, read data from the socket and write the data back.
             loop {
-                let n = socket
-                    .read(&mut buf)
-                    .await
-                    .expect("failed to read data from socket");
+                let ready = socket.ready(Interest::READABLE).await.expect("fail to check socket ready state");
 
-                if n == 0 {
-                    return;
+                if ready.is_readable() {
+                    let mut buf = vec![0; 1024];
+                    // Try to read data, this may still fail with `WouldBlock`
+                    // if the readiness event is a false positive.
+                    match socket.try_read(&mut buf) {
+                        Ok(n) => {
+                            //println!("read {} bytes", n);
+                            if n == 0 {
+                                return;
+                            }
+            
+                            socket
+                                .write_all(&buf[0..n])
+                                .await
+                                .expect("failed to write data to socket");
+                        }
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            continue;
+                        }
+                        Err(_e) => {
+                            //return Err(e.into());
+                            return;
+                        }
+                    }
+
                 }
 
-                socket
-                    .write_all(&buf[0..n])
-                    .await
-                    .expect("failed to write data to socket");
+
+                // let n = socket
+                //     .read(&mut buf)
+                //     .await
+                //     .expect("failed to read data from socket");
+
+                // if n == 0 {
+                //     return;
+                // }
+
+                // socket
+                //     .write_all(&buf[0..n])
+                //     .await
+                //     .expect("failed to write data to socket");
             }
         });
     }
